@@ -1,0 +1,12 @@
+name: Checks
+on: [push, pull_request]
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+      - run: sh -n install.sh uninstall.sh install-online.sh build-from-source.sh scripts/dependencies.sh
