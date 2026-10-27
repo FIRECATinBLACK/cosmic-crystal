@@ -55,6 +55,8 @@ def luminance(rgb):
 
 
 setting('crystal_enabled', True)
+setting('crystal_reactive_highlights', False)
+setting('crystal_visual_strength', 0)
 setting('crystal_everyday', True)
 setting('crystal_thickness', 40)
 setting('crystal_blur_amount', 0)

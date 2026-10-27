@@ -1,8 +1,8 @@
 diff --git a/cosmic-settings/src/pages/desktop/appearance/drawer.rs b/cosmic-settings/src/pages/desktop/appearance/drawer.rs
-index 32c727e..67096b1 100644
+index 32c727e..1b14947 100644
 --- a/cosmic-settings/src/pages/desktop/appearance/drawer.rs
 +++ b/cosmic-settings/src/pages/desktop/appearance/drawer.rs
-@@ -37,6 +37,12 @@ pub struct Content {
+@@ -37,6 +37,15 @@ pub struct Content {
      icon_handles: IconHandles,
      tk_config: Option<Config>,
      frosted: u8,
@@ -12,10 +12,13 @@ index 32c727e..67096b1 100644
 +    crystal_thickness: u8,
 +    crystal_refraction: u16,
 +    crystal_density: u16,
++    crystal_reactive_highlights: bool,
++    crystal_reactive_intensity: u8,
++    crystal_visual_strength: u8,
      glass: f32,
      frosted_system_interface: bool,
      frosted_windows: bool,
-@@ -125,6 +131,27 @@ impl From<&theme_manager::Manager> for Content {
+@@ -125,6 +134,38 @@ impl From<&theme_manager::Manager> for Content {
              ),
              font_config: font_config::Model::new(),
              frosted: theme.frosted as u8,
@@ -40,10 +43,21 @@ index 32c727e..67096b1 100644
 +                .get::<u16>("crystal_density")
 +                .unwrap_or(100)
 +                .clamp(25, 250),
++            crystal_reactive_highlights: comp_config
++                .get::<bool>("crystal_reactive_highlights")
++                .unwrap_or(true),
++            crystal_reactive_intensity: comp_config
++                .get::<u8>("crystal_reactive_intensity")
++                .unwrap_or(45)
++                .min(100),
++            crystal_visual_strength: comp_config
++                .get::<u8>("crystal_visual_strength")
++                .unwrap_or(1)
++                .min(2),
              glass: theme.alpha_map.guess_offset(),
              frosted_system_interface: theme.frosted_system_interface,
              frosted_windows: theme.frosted_windows,
-@@ -145,6 +172,52 @@ impl From<&theme_manager::Manager> for Content {
+@@ -145,6 +186,75 @@ impl From<&theme_manager::Manager> for Content {
  }
  
  impl Content {
@@ -93,10 +107,33 @@ index 32c727e..67096b1 100644
 +        }
 +    }
 +
++    pub fn set_crystal_reactive_highlights(&mut self, enabled: bool) {
++        match self.comp_config.set("crystal_reactive_highlights", enabled) {
++            Ok(()) => self.crystal_reactive_highlights = enabled,
++            Err(err) => error!(?err, "Failed to change reactive crystal highlights"),
++        }
++    }
++
++    pub fn set_crystal_reactive_intensity(&mut self, intensity: u8) {
++        let intensity = intensity.min(100);
++        match self.comp_config.set("crystal_reactive_intensity", intensity) {
++            Ok(()) => self.crystal_reactive_intensity = intensity,
++            Err(err) => error!(?err, "Failed to change reactive highlight intensity"),
++        }
++    }
++
++    pub fn set_crystal_visual_strength(&mut self, strength: u8) {
++        let strength = strength.min(2);
++        match self.comp_config.set("crystal_visual_strength", strength) {
++            Ok(()) => self.crystal_visual_strength = strength,
++            Err(err) => error!(?err, "Failed to change crystal visual strength"),
++        }
++    }
++
      pub fn current_font_family(&self, context_view: &ContextView) -> String {
          match *context_view {
              ContextView::SystemFont => self.font_config.interface_font.family.clone(),
-@@ -617,7 +690,38 @@ impl Content {
+@@ -617,7 +727,38 @@ impl Content {
      }
  
      pub fn frosted_glass(&self) -> Element<'_, crate::pages::Message> {
@@ -135,7 +172,7 @@ index 32c727e..67096b1 100644
              .add(
                  settings::item::builder(fl!("style", "frosted-panels"))
                      .description(fl!("style", "frosted-panels-desc"))
-@@ -642,21 +746,85 @@ impl Content {
+@@ -642,21 +783,142 @@ impl Content {
                      .toggler(self.frosted_windows, Message::FrostedWindows),
              )
              .add(
@@ -185,6 +222,33 @@ index 32c727e..67096b1 100644
                  }),
              )
 +            .add_maybe(self.crystal_enabled.then(|| {
++                settings::item::builder(fl!("crystal-strength-subtle"))
++                    .description(fl!("crystal-strength-subtle-desc"))
++                    .radio(
++                        0_u8,
++                        Some(self.crystal_visual_strength),
++                        Message::CrystalVisualStrength,
++                    )
++            }))
++            .add_maybe(self.crystal_enabled.then(|| {
++                settings::item::builder(fl!("crystal-strength-vivid"))
++                    .description(fl!("crystal-strength-vivid-desc"))
++                    .radio(
++                        1_u8,
++                        Some(self.crystal_visual_strength),
++                        Message::CrystalVisualStrength,
++                    )
++            }))
++            .add_maybe(self.crystal_enabled.then(|| {
++                settings::item::builder(fl!("crystal-strength-extreme"))
++                    .description(fl!("crystal-strength-extreme-desc"))
++                    .radio(
++                        2_u8,
++                        Some(self.crystal_visual_strength),
++                        Message::CrystalVisualStrength,
++                    )
++            }))
++            .add_maybe(self.crystal_enabled.then(|| {
 +                settings::item::builder(fl!("crystal-thickness"))
 +                    .description(fl!("crystal-thickness-desc"))
 +                    .flex_control(
@@ -210,6 +274,36 @@ index 32c727e..67096b1 100644
 +                    .toggler(self.crystal_everyday, Message::CrystalEveryday)
 +            }))
 +            .add_maybe(self.crystal_enabled.then(|| {
++                settings::item::builder(fl!("crystal-reactive-highlights"))
++                    .description(fl!("crystal-reactive-highlights-desc"))
++                    .toggler(
++                        self.crystal_reactive_highlights,
++                        Message::CrystalReactiveHighlights,
++                    )
++            }))
++            .add_maybe((self.crystal_enabled && self.crystal_reactive_highlights).then(|| {
++                settings::item::builder(fl!("crystal-reactive-intensity")).flex_control(
++                    row::with_children(vec![
++                        slider(
++                            0..=100,
++                            self.crystal_reactive_intensity,
++                            Message::CrystalReactiveIntensity,
++                        )
++                        .step(1_u8)
++                        .width(Length::Fill)
++                        .apply(container)
++                        .max_width(250)
++                        .into(),
++                        text::body(format!("{}%", self.crystal_reactive_intensity))
++                            .width(Length::Fixed(50.0))
++                            .into(),
++                    ])
++                    .align_y(Alignment::Center)
++                    .spacing(12)
++                    .width(Length::Fill),
++                )
++            }))
++            .add_maybe(self.crystal_enabled.then(|| {
 +                crystal_slider(
 +                    fl!("crystal-refraction"),
 +                    self.crystal_refraction,
@@ -229,10 +323,10 @@ index 32c727e..67096b1 100644
                  settings::item::builder(fl!("style", "glass-opacity")).flex_control({
                      row::with_children(vec![
 diff --git a/cosmic-settings/src/pages/desktop/appearance/mod.rs b/cosmic-settings/src/pages/desktop/appearance/mod.rs
-index 7ab3061..e7ad7c8 100644
+index 7ab3061..0b07963 100644
 --- a/cosmic-settings/src/pages/desktop/appearance/mod.rs
 +++ b/cosmic-settings/src/pages/desktop/appearance/mod.rs
-@@ -161,6 +161,12 @@ pub enum Message {
+@@ -161,6 +161,15 @@ pub enum Message {
      WindowHintSize(u32),
      Daytime(bool),
      Blur(u8),
@@ -242,10 +336,13 @@ index 7ab3061..e7ad7c8 100644
 +    CrystalThickness(u8),
 +    CrystalRefraction(u16),
 +    CrystalDensity(u16),
++    CrystalReactiveHighlights(bool),
++    CrystalReactiveIntensity(u8),
++    CrystalVisualStrength(u8),
      Glass(f32),
      FrostedPanel(bool),
      FrostedApplets(bool),
-@@ -538,6 +544,24 @@ impl Page {
+@@ -538,6 +547,33 @@ impl Page {
                      });
                  }
              }
@@ -267,6 +364,15 @@ index 7ab3061..e7ad7c8 100644
 +            Message::CrystalDensity(density) => {
 +                self.drawer.set_crystal_density(density);
 +            }
++            Message::CrystalReactiveHighlights(enabled) => {
++                self.drawer.set_crystal_reactive_highlights(enabled);
++            }
++            Message::CrystalReactiveIntensity(intensity) => {
++                self.drawer.set_crystal_reactive_intensity(intensity);
++            }
++            Message::CrystalVisualStrength(strength) => {
++                self.drawer.set_crystal_visual_strength(strength);
++            }
              Message::Blur(b) => {
                  let Ok(blur_strength) = b.try_into() else {
                      tracing::error!("Invalid blur strength: {b}");
@@ -286,10 +392,10 @@ index cfce2b1..f835b21 100644
                  .map(crate::pages::Message::Appearance)
          })
 diff --git a/i18n/en/cosmic_settings.ftl b/i18n/en/cosmic_settings.ftl
-index b27e2f7..bbe4af4 100644
+index b27e2f7..0c92b36 100644
 --- a/i18n/en/cosmic_settings.ftl
 +++ b/i18n/en/cosmic_settings.ftl
-@@ -414,6 +414,15 @@ icon-theme = Icon theme
+@@ -414,6 +414,24 @@ icon-theme = Icon theme
  text-tint = Interface text tint
      .desc = Used to derive interface text colors that have sufficient contrast on various surfaces
  
@@ -301,6 +407,15 @@ index b27e2f7..bbe4af4 100644
 +crystal-everyday-desc = Calmer centers, crystal edges, and a theme-aware backdrop for reading. Turn off for the expressive effect.
 +crystal-refraction = Refraction strength
 +crystal-density = Crystal density
++crystal-reactive-highlights = Reactive highlights
++crystal-reactive-highlights-desc = Facet glints respond to brightness, contrast, color, and edges in the desktop behind the glass.
++crystal-reactive-intensity = Reactive highlight intensity
++crystal-strength-subtle = Subtle
++crystal-strength-subtle-desc = Original restrained optics with gentle facet reactions.
++crystal-strength-vivid = Vivid
++crystal-strength-vivid-desc = Polished gemstone glass with stronger depth, refraction, color, and reactive rims. Recommended.
++crystal-strength-extreme = Extreme
++crystal-strength-extreme-desc = Deliberately exaggerated gloss, thickness, and refraction for experimentation.
 +
  style = Style
      .round = Round

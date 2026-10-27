@@ -123,7 +123,9 @@ def defaults(config):
     changes = {comp / 'crystal_enabled': 'true\n'}
     for key, value in {'crystal_blur_amount': '70', 'crystal_everyday': 'true',
                        'crystal_thickness': '40', 'crystal_refraction': '150',
-                       'crystal_density': '100'}.items():
+                       'crystal_density': '100', 'crystal_reactive_highlights': 'true',
+                       'crystal_reactive_intensity': '45',
+                       'crystal_visual_strength': '1'}.items():
         if not (comp / key).exists():
             changes[comp / key] = value + '\n'
     for mode in ('Dark', 'Light'):

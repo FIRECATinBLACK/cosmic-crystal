@@ -51,6 +51,8 @@ def check(name, condition):
 
 
 setting('crystal_enabled', True)
+setting('crystal_reactive_highlights', False)
+setting('crystal_visual_strength', 0)
 setting('crystal_everyday', False)
 setting('crystal_thickness', 0)
 setting('crystal_blur_amount', 0)

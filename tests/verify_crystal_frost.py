@@ -20,7 +20,9 @@ RUN = Path(os.environ['CRYSTAL_QA_DIR'])
 STATE = json.loads((RUN / 'state.json').read_text())
 CONFIG = RUN / 'config/cosmic/com.system76.CosmicComp/v1'
 BACKGROUND = RUN / 'config/cosmic/com.system76.CosmicBackground/v1/all'
-keys = ['crystal_enabled', 'crystal_everyday', 'crystal_blur_amount', 'crystal_refraction', 'crystal_density', 'crystal_thickness']
+keys = ['crystal_enabled', 'crystal_everyday', 'crystal_blur_amount', 'crystal_refraction',
+        'crystal_density', 'crystal_thickness', 'crystal_reactive_highlights',
+        'crystal_visual_strength']
 saved = {key: (CONFIG / key).read_bytes() if (CONFIG / key).exists() else None for key in keys}
 old_background = BACKGROUND.read_bytes()
 results = []
@@ -82,6 +84,8 @@ def minimum_contrast(image, box):
 
 try:
     setting('crystal_enabled', True)
+    setting('crystal_reactive_highlights', False)
+    setting('crystal_visual_strength', 0)
     setting('crystal_everyday', True)
     setting('crystal_refraction', 150)
     setting('crystal_density', 100)

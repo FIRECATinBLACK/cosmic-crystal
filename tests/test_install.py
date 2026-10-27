@@ -58,6 +58,12 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(category.read_text().strip(), 'true')
         thickness = self.config / 'com.system76.CosmicComp/v1/crystal_thickness'
         self.assertEqual(thickness.read_text().strip(), '40')
+        reactive = self.config / 'com.system76.CosmicComp/v1/crystal_reactive_highlights'
+        intensity = self.config / 'com.system76.CosmicComp/v1/crystal_reactive_intensity'
+        strength = self.config / 'com.system76.CosmicComp/v1/crystal_visual_strength'
+        self.assertEqual(reactive.read_text().strip(), 'true')
+        self.assertEqual(intensity.read_text().strip(), '45')
+        self.assertEqual(strength.read_text().strip(), '1')
         thickness.write_text('83')
         self.install()
         self.assertEqual(thickness.read_text(), '83')

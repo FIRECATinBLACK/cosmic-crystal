@@ -27,6 +27,20 @@ uniform float blur_amount;
 uniform float crystal_thickness;
 uniform float everyday_mode;
 uniform vec3 theme_tint;
+uniform float reactive_highlights;
+uniform float reactive_intensity;
+uniform float visual_strength;
+
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+float preset_value(float subtle, float vivid, float extreme) {
+    float strength = clamp(visual_strength, 0.0, 2.0);
+    return strength < 1.0
+        ? mix(subtle, vivid, strength)
+        : mix(vivid, extreme, strength - 1.0);
+}
 
 vec2 hash2(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -45,7 +59,7 @@ float polish_noise(vec2 p) {
 // A weighted Voronoi cut: scattered sites and unequal weights produce irregular
 // polygon faces of different sizes, without a repeated triangular lattice.
 // Keep sites in surface coordinates so the random cuts stay still on movement.
-vec4 facet(vec2 p, out vec3 cut_edge) {
+vec4 facet(vec2 p, out vec3 cut_edge, out vec2 face_curve) {
     vec2 position = p * facet_density / vec2(170.0, 155.0);
     vec2 cell = floor(position);
     float nearest = 100.0;
@@ -73,6 +87,9 @@ vec4 facet(vec2 p, out vec3 cut_edge) {
     }
     float seam = (second - nearest) / max(2.0 * distance(closest_site, next_site), 0.01);
     cut_edge = vec3(normalize(next_site - closest_site), seam * 160.0 / facet_density);
+    // The vector from the generating site is a cheap, stable approximation of
+    // a slightly convex lens profile within this individual polygon.
+    face_curve = clamp(position - closest_site, vec2(-1.0), vec2(1.0));
     vec2 slope = (hash2(closest_id + 93.2) - 0.5) * 0.8;
     return vec4(slope, 1.0 - smoothstep(0.0015, 0.006, seam), hash2(closest_id + 152.7).y);
 }
@@ -102,15 +119,24 @@ void main() {
     float edge_focus = 1.0 - smoothstep(4.0, edge_span, distance_inside);
     float compact = 1.0 - smoothstep(96.0, 420.0, short_side);
     float crystal_weight = mix(1.0, 0.60 * edge_focus + 0.20 * compact, everyday_mode);
+    float convex_strength = preset_value(0.14, 0.27, 0.42);
+    float refraction_gain = preset_value(1.0, 1.45, 1.95);
+    float depth_gain = preset_value(1.0, 1.35, 1.75);
+    float surface_gain = preset_value(1.0, 1.40, 1.85);
     vec3 cut_edge;
-    vec4 cut = facet(p, cut_edge);
-    vec3 normal = normalize(vec3(cut.xy + edge_normal * bevel * 0.85, 1.0));
+    vec2 face_curve;
+    vec4 cut = facet(p, cut_edge, face_curve);
+    vec3 normal = normalize(vec3(cut.xy + face_curve * convex_strength * crystal_weight
+        + edge_normal * bevel * 0.85, 1.0));
     // Snell refraction at air / crystal (IOR 1.52), with bounded optical depth.
     vec3 ray = refract(vec3(0.0, 0.0, -1.0), normal, 1.0 / 1.52);
-    float optical_depth = 80.0 * (1.0 + 0.90 * crystal_thickness);
+    float optical_depth = 80.0 * depth_gain * (1.0 + 0.90 * crystal_thickness);
     vec2 displacement = ray.xy / max(-ray.z, 0.5) * optical_depth * refraction_strength;
+    // Unequal optical depth helps every face read as an individual lens.
+    displacement *= mix(0.90, 1.12, cut.w);
     // Keep all sampled rays inside the compositor's captured background margin.
-    displacement *= min(1.0, 40.0 * refraction_strength / max(length(displacement), 0.0001));
+    float displacement_limit = 40.0 * refraction_strength * refraction_gain * 1.12;
+    displacement *= min(1.0, displacement_limit / max(length(displacement), 0.0001));
     displacement *= crystal_weight;
     vec2 safe_min = uv_per_pixel * 0.5;
     vec2 safe_max = vec2(1.0) - safe_min;
@@ -165,19 +191,94 @@ void main() {
     // Frost hides the background discontinuities at facet borders. Strengthen
     // surface reflections as it rises so the crystal cuts remain readable.
     float frost = blur_amount * blur_amount;
-    float face_light = (facing - light.z) * (0.15 + 0.20 * frost) * crystal_weight;
-    float sparkle = pow(max(facing, 0.0), 26.0) * 0.18 * crystal_weight;
-    float rim = (1.0 - smoothstep(0.3, 1.7, distance_inside)) * 0.22;
-    float bevel_light = bevel * max(dot(edge_normal, normalize(vec2(-0.6, -0.8))), 0.0) * 0.16;
+    float face_light = (facing - light.z) * (0.15 + 0.20 * frost)
+        * surface_gain * crystal_weight;
+    float specular_power = preset_value(26.0, 34.0, 44.0);
+    float sparkle = pow(max(facing, 0.0), specular_power)
+        * preset_value(0.18, 0.31, 0.48) * crystal_weight;
+    float rim = (1.0 - smoothstep(0.3, preset_value(1.7, 2.8, 4.2), distance_inside))
+        * preset_value(0.22, 0.31, 0.43);
+    float bevel_light = bevel * max(dot(edge_normal, normalize(vec2(-0.6, -0.8))), 0.0)
+        * preset_value(0.16, 0.23, 0.32);
     // Reflect light on selected, softly beveled stretches instead of outlining
     // every polygon. Direction and broad surface variation break up the glints.
     float edge_polish = polish_noise(p * facet_density / vec2(48.0, 59.0) + 73.5);
-    float edge_bevel = 1.0 - smoothstep(0.0, mix(1.5, 4.5, edge_polish), cut_edge.z);
+    float edge_bevel = 1.0 - smoothstep(0.0,
+        mix(preset_value(1.5, 2.3, 3.0), preset_value(4.5, 6.5, 9.0), edge_polish),
+        cut_edge.z);
     float edge_facing = dot(cut_edge.xy, normalize(vec2(-0.6, -0.8)));
     float reflection_patch = smoothstep(0.40, 0.68, edge_polish) * edge_bevel;
-    float cut_glint = cut.z * 0.012 * (1.0 - frost)
-        + pow(max(edge_facing, 0.0), 3.0) * reflection_patch * 0.08 * frost;
-    float cut_shade = max(-edge_facing, 0.0) * reflection_patch * 0.025 * frost;
+    float cut_glint = cut.z * preset_value(0.012, 0.020, 0.032) * (1.0 - frost)
+        + pow(max(edge_facing, 0.0), 3.0) * reflection_patch
+            * preset_value(0.08, 0.14, 0.22) * frost;
+    float cut_shade = max(-edge_facing, 0.0) * reflection_patch
+        * preset_value(0.025, 0.040, 0.060) * frost;
+    // Analyze the real captured desktop around this refracted point. Sampling
+    // along the facet boundary normal and tangent provides a filtered local
+    // gradient/contrast estimate without a separate full-screen pass.
+    vec3 reactive_glint = vec3(0.0);
+    vec3 reactive_backdrop = vec3(1.0);
+    float backdrop_response = 0.0;
+    if (reactive_highlights > 0.5 && reactive_intensity > 0.0) {
+        vec2 edge_axis = cut_edge.xy;
+        vec2 edge_tangent = vec2(-edge_axis.y, edge_axis.x);
+        float analysis_scale = preset_value(1.0, 1.38, 1.75);
+        vec2 analysis_step = uv_per_pixel * mix(2.0, 4.0, blur_amount) * analysis_scale;
+        vec3 sample_center = texture2D(sharp_tex, green_uv).rgb;
+        vec3 sample_positive = texture2D(sharp_tex,
+            clamp(green_uv + edge_axis * analysis_step, safe_min, safe_max)).rgb;
+        vec3 sample_negative = texture2D(sharp_tex,
+            clamp(green_uv - edge_axis * analysis_step, safe_min, safe_max)).rgb;
+        vec3 sample_tangent_positive = texture2D(sharp_tex,
+            clamp(green_uv + edge_tangent * analysis_step, safe_min, safe_max)).rgb;
+        vec3 sample_tangent_negative = texture2D(sharp_tex,
+            clamp(green_uv - edge_tangent * analysis_step, safe_min, safe_max)).rgb;
+        float center_luma = luminance(sample_center);
+        float axis_gradient = luminance(sample_positive) - luminance(sample_negative);
+        float tangent_gradient = luminance(sample_tangent_positive)
+            - luminance(sample_tangent_negative);
+        vec2 backdrop_gradient = edge_axis * axis_gradient
+            + edge_tangent * tangent_gradient;
+        float local_contrast = max(abs(axis_gradient), abs(tangent_gradient));
+        local_contrast = max(local_contrast,
+            max(abs(luminance(sample_positive) - center_luma),
+                abs(luminance(sample_negative) - center_luma)));
+        float local_brightness = max(center_luma,
+            max(max(luminance(sample_positive), luminance(sample_negative)),
+                max(luminance(sample_tangent_positive),
+                    luminance(sample_tangent_negative))));
+        float response = 0.78 * smoothstep(0.022, 0.22, local_contrast)
+            + 0.22 * smoothstep(0.42, 0.92, local_brightness);
+        response = pow(clamp(response, 0.0, 1.0), preset_value(1.0, 0.82, 0.68));
+        vec2 gradient_direction = normalize(backdrop_gradient + vec2(0.00001));
+        float edge_alignment = mix(0.35, 1.0,
+            abs(dot(gradient_direction, edge_axis)));
+        float face_alignment = mix(0.72, 1.0,
+            abs(dot(gradient_direction, normalize(normal.xy + vec2(0.00001)))));
+        float rim_width = preset_value(3.8, 6.2, 9.0);
+        float facet_rim = 1.0 - smoothstep(0.30, rim_width, cut_edge.z);
+        facet_rim = facet_rim * facet_rim * (3.0 - 2.0 * facet_rim);
+        float rim_core = 1.0 - smoothstep(0.18,
+            preset_value(1.15, 1.85, 2.65), cut_edge.z);
+        float droplet_rim = mix(facet_rim, rim_core,
+            preset_value(0.18, 0.28, 0.36));
+        float reading_weight = mix(1.0, 0.25 + 0.75 * edge_focus, everyday_mode);
+        vec3 backdrop_tint = (sample_center + sample_positive + sample_negative
+            + sample_tangent_positive + sample_tangent_negative) * 0.2;
+        vec3 bright_side = axis_gradient >= 0.0 ? sample_positive : sample_negative;
+        backdrop_tint = mix(backdrop_tint, bright_side,
+            preset_value(0.10, 0.22, 0.34));
+        float color_influence = preset_value(0.28, 0.46, 0.62);
+        vec3 specular_color = mix(vec3(1.0), clamp(backdrop_tint * 1.20, 0.0, 1.0),
+            color_influence);
+        float facet_variation = mix(0.68, 1.16, cut.w)
+            * mix(0.72, 1.0, edge_polish);
+        reactive_glint = specular_color * response * edge_alignment * face_alignment
+            * droplet_rim * facet_variation * reading_weight * reactive_intensity
+            * preset_value(0.18, 0.46, 0.72);
+        reactive_backdrop = backdrop_tint;
+        backdrop_response = response;
+    }
     // Faint secondary transmission gives selected chips internal depth. Reuse
     // the same roughness so a fully frosted surface never reveals sharp rays.
     vec2 internal_uv = clamp(v_coords - displacement * 0.55 * uv_per_pixel, safe_min, safe_max);
@@ -185,7 +286,10 @@ void main() {
     if (blur_amount > 0.0 && blur_amount < 1.0) {
         internal_color = mix(texture2D(sharp_tex, internal_uv), internal_color, surface_roughness);
     }
-    color = mix(color, internal_color, reflection_patch * crystal_weight * 0.075
+    internal_color.rgb = mix(internal_color.rgb, reactive_backdrop * internal_color.a,
+        backdrop_response * preset_value(0.0, 0.10, 0.18));
+    color = mix(color, internal_color, reflection_patch * crystal_weight
+        * preset_value(0.075, 0.14, 0.22)
         * crystal_thickness);
     // Thickness progressively reveals up to three internal fracture depths.
     for (int layer = 0; layer < 3; layer++) {
@@ -201,7 +305,10 @@ void main() {
                 if (blur_amount > 0.0 && blur_amount < 1.0) {
                     transmission = mix(texture2D(sharp_tex, inside_uv), transmission, surface_roughness);
                 }
-                color = mix(color, transmission, presence * crystal_weight * 0.035);
+                transmission.rgb = mix(transmission.rgb, reactive_backdrop * transmission.a,
+                    backdrop_response * preset_value(0.0, 0.08, 0.14));
+                color = mix(color, transmission, presence * crystal_weight
+                    * preset_value(0.035, 0.060, 0.090));
             }
         }
     }
@@ -210,7 +317,14 @@ void main() {
     cut_glint *= crystal_weight;
     cut_shade *= crystal_weight;
     color.rgb = clamp(color.rgb * (1.0 + face_light - cut_shade)
-        + vec3(sparkle + rim + bevel_light + cut_glint) * color.a, vec3(0.0), vec3(color.a));
+        + vec3(sparkle + rim + bevel_light + cut_glint) * color.a,
+        vec3(0.0), vec3(color.a));
+    // Screen most of the reactive energy into available headroom. A small
+    // additive core preserves jewel-like peaks without flattening every bright
+    // facet to white.
+    vec3 highlight_headroom = max(vec3(color.a) - color.rgb, vec3(0.0));
+    color.rgb = clamp(color.rgb + reactive_glint
+        * (0.78 * highlight_headroom + 0.22 * color.a), vec3(0.0), vec3(color.a));
     float tone_mode = max(everyday_mode, crystal_thickness * crystal_thickness);
     if (tone_mode > 0.0 && blur_amount > 0.0) {
         // A theme-aware, bounded backdrop tone supports the system's foreground

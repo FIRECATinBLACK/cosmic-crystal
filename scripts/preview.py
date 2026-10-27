@@ -78,7 +78,10 @@ try:
     config = run / 'config/cosmic/com.system76.CosmicComp/v1'
     config.mkdir(parents=True, exist_ok=True)
     for key, value in {'crystal_enabled': 'true', 'crystal_blur': '0', 'crystal_refraction': '150',
-                       'crystal_blur_amount': '0', 'crystal_density': '100', 'autotile': 'false'}.items():
+                       'crystal_blur_amount': '0', 'crystal_density': '100',
+                       'crystal_reactive_highlights': 'true',
+                       'crystal_reactive_intensity': '45',
+                       'crystal_visual_strength': '1', 'autotile': 'false'}.items():
         (config / key).write_text(value + '\n')
     # Enable the existing glass categories in this private theme only.
     for mode in ['Dark', 'Light']:
